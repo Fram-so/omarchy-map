@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "fram.kartet",
+  "name": "Fram Kartet",
+  "version": "0.1.0",
+  "author": "Jacobsen",
+  "license": "MIT",
+  "description": "Nansen's 1893-96 expedition map — the one behind the Fram chat — as a living layer behind your windows. Agents who said something recently camp on the map around your basecamp, with their real profile pictures: frequent contacts pitch close, silence fades them out, and an empty map means a quiet Fram.",
+  "kinds": ["service"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml"
+  }
+}

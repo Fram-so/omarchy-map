@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+"""Drive fram.kartet without the platform.
+
+Writes the same ~/.local/state/fram/voices.json the desktop app will publish,
+so the plugin cannot tell the difference. Real voices are slow and rare — you
+cannot make a colleague speak on demand just to check a bubble renders.
+
+  fram-kartet-mock                 one frame: rings, ages and bubbles covered
+  fram-kartet-mock --count 8       fewer camps
+  fram-kartet-mock --empty         quiet Fram (field should self-hide)
+  fram-kartet-mock --restore       hand the file back to the app
+
+Backs the real file up on first run (voices.json.real) and puts it back with
+--restore. Writes atomically (tmp + rename), same as the app.
+"""
+
+import argparse
+import json
+import os
+import sys
+import time
+
+STATE_DIR = os.path.join(
+    os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state")), "fram"
+)
+VOICES = os.path.join(STATE_DIR, "voices.json")
+BACKUP = VOICES + ".real"
+ROSTER_CANDIDATES = [
+    os.path.join(STATE_DIR, "agents.json.real"),
+    os.path.join(STATE_DIR, "agents.json"),
+]
+
+# (minutes ago, messages last 30d, message) — covers every ring and fade band:
+# three fresh with bubbles, the middle band half-faded, the tail packing up.
+SCRIPT = [
+    (2,    42, "Wireframen er godkjent — bygger pluginen nå, ikke gi meg før det er good 🗺️"),
+    (9,    31, "5 unike besøk i går — trafikken tikker oppover, full rapport ligger i tasken."),
+    (41,   24, "PR-en for onboarding-flyten er oppe, to kommentarer igjen før merge."),
+    (150,  12, "Stripe-webhooken svarer 200 igjen etter retry-fiksen."),
+    (260,   8, "Ukesrapporten er utkast — mangler bare tallene fra i går."),
+    (330,   5, "Depotet er lagt: cron for nattlige backups kjører grønt."),
+    (680,   3, "Tok en runde på feed-ytelsen, notater i wiki."),
+    (1080,  1, "Sjekket ut Linear-integrasjonen, parkert til neste uke."),
+    (55,   28, "KR-målingen for besøk er koblet mot Plausible nå."),
+    (400,   6, "Ny variant av hero-teksten ligger klar til review."),
+    (95,   21, "Deploy til prod gikk rent — 34 sek, null feil i loggen."),
+    (760,   2, "La inn forslag til pricing-side i figma-lenka."),
+]
+
+
+def load_roster():
+    for path in ROSTER_CANDIDATES:
+        try:
+            with open(path) as f:
+                agents = json.load(f).get("agents", [])
+                if agents:
+                    return agents
+        except (OSError, ValueError):
+            continue
+    return []
+
+
+def atomic_write(payload):
+    os.makedirs(STATE_DIR, exist_ok=True)
+    tmp = VOICES + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, VOICES)
+
+
+def backup_real_once():
+    if not os.path.exists(VOICES) or os.path.exists(BACKUP):
+        return
+    try:
+        with open(VOICES) as f:
+            if json.load(f).get("source") == "fram-kartet-mock":
+                return
+    except (OSError, ValueError):
+        pass
+    os.rename(VOICES, BACKUP)
+    print(f"backed up real file to {BACKUP}")
+
+
+def restore():
+    if os.path.exists(BACKUP):
+        os.replace(BACKUP, VOICES)
+        print(f"restored {VOICES}")
+    elif os.path.exists(VOICES):
+        os.remove(VOICES)
+        print(f"removed mock {VOICES} (no backup existed)")
+    else:
+        print("nothing to restore")
+
+
+def build(count):
+    agents = load_roster()
+    # Faces first: the point of the mock is seeing real profile pictures.
+    with_avatar = [a for a in agents if a.get("avatar")]
+    without = [a for a in agents if not a.get("avatar")]
+    # A couple of initials-fallbacks on purpose, so that path stays honest.
+    lineup = with_avatar[:max(0, count - 2)] + without[:2]
+    lineup = lineup[:count]
+
+    now = time.time()
+    voices = []
+    for i, agent in enumerate(lineup):
+        minutes, freq, message = SCRIPT[i % len(SCRIPT)]
+        voices.append({
+            "id": agent["id"],
+            "lastMessage": message,
+            "lastAt": int(now - minutes * 60),
+            "messages30d": freq,
+        })
+    return {
+        "schemaVersion": 1,
+        "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "source": "fram-kartet-mock",
+        "voices": voices,
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--count", type=int, default=12)
+    parser.add_argument("--empty", action="store_true")
+    parser.add_argument("--restore", action="store_true")
+    args = parser.parse_args()
+
+    if args.restore:
+        restore()
+        return
+
+    backup_real_once()
+    if args.empty:
+        atomic_write({
+            "schemaVersion": 1,
+            "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "source": "fram-kartet-mock",
+            "voices": [],
+        })
+        print("wrote empty voices — the field should self-hide")
+        return
+
+    payload = build(args.count)
+    atomic_write(payload)
+    print(f"wrote {len(payload['voices'])} voices to {VOICES}")
+    for v in payload["voices"]:
+        age_min = int((time.time() - v["lastAt"]) / 60)
+        print(f"  {v['id']:<28} {age_min:>5} min ago  {v['messages30d']:>3}/30d")
+
+
+if __name__ == "__main__":
+    sys.exit(main())
