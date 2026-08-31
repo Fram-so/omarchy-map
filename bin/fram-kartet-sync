@@ -1,0 +1,231 @@
+#!/usr/bin/env node
+// fram-kartet-sync — publish real voices.json for the Kartet plugin.
+//
+// The box's original roster pipeline (Fram Desktop writing
+// ~/.local/state/fram/agents.json every 20 s) died in the 2026-08-31 Omarchy
+// reinstall, and nothing ships a voices publisher at all — `fram-kartet-mock`
+// fakes one from the roster. This script is the real producer for the voices
+// half of the contract Kartet reads:
+//
+//   ~/.local/state/fram/voices.json
+//   { schemaVersion, updatedAt, source, voices: [
+//       { id: "fram:<username>", lastMessage, lastAt, messages30d } ] }
+//
+// Data source: the Fram platform API, read with the engine token the runtime
+// rewrites into <workdir>/.fram.json every agent turn. Two surfaces feed the
+// counts: conversations of kind "channel"/null ("default" task threads are
+// skipped as noise), and the expedition feed (/log_entries) — most crew
+// activity is log entries, not chat, so without the feed the map goes almost
+// dark. Only AI crew count as voices — the human at basecamp is drawn by the
+// UI, not by this file.
+//
+// Incremental: a private state file keeps every non-system message seen
+// inside the window, so steady-state runs fetch one page per conversation
+// and old messages age out of the counts without a rescan.
+//
+// Exit code is 0 even when the token is stale — the timer must not flap.
+// The reason lands in the journal and in the state file's lastError.
+
+'use strict';
+
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+const HOME = os.homedir();
+const STATE_HOME = process.env.XDG_STATE_HOME || path.join(HOME, '.local/state');
+const CONFIG_HOME = process.env.XDG_CONFIG_HOME || path.join(HOME, '.config');
+const VOICES_PATH = path.join(STATE_HOME, 'fram/voices.json');
+const STATE_PATH = path.join(STATE_HOME, 'fram/kartet-sync-state.json');
+const CONFIG_PATH = path.join(CONFIG_HOME, 'fram/kartet.json');
+const BOOTSTRAP_PATH = process.env.FRAM_KARTET_BOOTSTRAP
+  || path.join(HOME, 'Work/fram-omarchy/.fram.json');
+
+const WINDOW_DAYS = 30;
+const PER_PAGE = 100;
+const MAX_PAGES_PER_CONV = 10;  // first-run backfill cap; steady state uses 1
+const MAX_CONVERSATIONS = 8;
+const SNIPPET_LEN = 200;
+
+function log(msg) { process.stderr.write(`fram-kartet-sync: ${msg}\n`); }
+
+function readJson(file) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
+}
+
+function writeJsonAtomic(file, value) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, JSON.stringify(value, null, 1) + '\n');
+  fs.renameSync(tmp, file);
+}
+
+// Token: prefer the live agent environment, fall back to the bootstrap file
+// the runtime refreshes every turn. A decodable, unexpired JWT is required —
+// running with a dead token would only spend the error budget.
+function resolveAuth() {
+  let url = process.env.FRAM_URL || null;
+  let token = process.env.FRAM_TOKEN || null;
+  if (!token) {
+    const boot = readJson(BOOTSTRAP_PATH);
+    if (boot) { token = boot.token || null; url = url || boot.url || null; }
+  }
+  if (!token) return { error: 'no token in env or ' + BOOTSTRAP_PATH };
+  try {
+    const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString());
+    if (payload.exp && payload.exp * 1000 < Date.now()) {
+      return { error: `token expired ${new Date(payload.exp * 1000).toISOString()}` };
+    }
+  } catch { /* not a JWT — let the API decide */ }
+  url = (url || 'https://fram.so').replace(/\/+$/, '');
+  if (!/\/api\/v1$/.test(url)) url += '/api/v1';
+  return { url, token };
+}
+
+async function apiGet(auth, pathname) {
+  const res = await fetch(auth.url + pathname, {
+    headers: {
+      Authorization: `Bearer ${auth.token}`,
+      'User-Agent': 'fram-kartet-sync/1.0',
+      Accept: 'application/json'
+    }
+  });
+  if (!res.ok) throw new Error(`GET ${pathname} → HTTP ${res.status}`);
+  return res.json();
+}
+
+async function discoverConversations(auth, config) {
+  if (Array.isArray(config.syncConversations) && config.syncConversations.length) {
+    return config.syncConversations.slice(0, MAX_CONVERSATIONS);
+  }
+  const data = await apiGet(auth, '/conversations');
+  const list = Array.isArray(data) ? data : (data.conversations || []);
+  return list
+    .filter(c => c.kind === 'channel' || c.kind == null)
+    .map(c => c.id)
+    .filter(id => Number.isInteger(id))
+    .slice(0, MAX_CONVERSATIONS);
+}
+
+// Newest-first pages; stop when a page dips under the window or below the
+// conversation's last-seen id from the previous run.
+async function fetchNewMessages(auth, convId, lastSeenId, cutoff) {
+  const fresh = [];
+  const maxPages = lastSeenId ? 1 : MAX_PAGES_PER_CONV;
+  for (let page = 1; page <= maxPages; page++) {
+    const data = await apiGet(auth, `/conversations/${convId}/messages?page=${page}&per_page=${PER_PAGE}`);
+    const msgs = data.messages || [];
+    let done = msgs.length === 0;
+    for (const m of msgs) {
+      if ((lastSeenId && m.id <= lastSeenId) || (m.created_at && m.created_at < cutoff)) {
+        done = true;
+        continue;
+      }
+      fresh.push(m);
+    }
+    if (done || !data.has_more) break;
+  }
+  return fresh;
+}
+
+function toEvent(m) {
+  if (m.kind === 'system' || !m.user || m.user.ai !== true || !m.user.username) return null;
+  const text = (m.content || m.text || '').replace(/\s+/g, ' ').trim();
+  return {
+    u: m.user.username,
+    t: m.created_at,
+    c: text.slice(0, SNIPPET_LEN)
+  };
+}
+
+// The expedition feed, same watermark pattern as a conversation.
+async function fetchNewLogEntries(auth, expeditionId, lastSeenId, cutoff) {
+  const fresh = [];
+  const maxPages = lastSeenId ? 1 : MAX_PAGES_PER_CONV;
+  for (let page = 1; page <= maxPages; page++) {
+    const data = await apiGet(auth, `/log_entries?expedition_id=${expeditionId}&page=${page}&per_page=${PER_PAGE}`);
+    const entries = data.log_entries || [];
+    let done = entries.length === 0;
+    for (const e of entries) {
+      if ((lastSeenId && e.id <= lastSeenId) || (e.created_at && e.created_at < cutoff)) {
+        done = true;
+        continue;
+      }
+      fresh.push(e);
+    }
+    if (done || data.has_more === false) break;
+  }
+  return fresh;
+}
+
+async function main() {
+  const auth = resolveAuth();
+  const state = readJson(STATE_PATH) || { lastSeen: {}, messages: {} };
+  if (auth.error) {
+    log(auth.error + ' — keeping previous voices.json');
+    state.lastError = { at: new Date().toISOString(), error: auth.error };
+    writeJsonAtomic(STATE_PATH, state);
+    return;
+  }
+
+  const config = readJson(CONFIG_PATH) || {};
+  const now = Math.floor(Date.now() / 1000);
+  const cutoff = now - WINDOW_DAYS * 86400;
+
+  const convIds = await discoverConversations(auth, config);
+  let added = 0;
+  for (const convId of convIds) {
+    const fresh = await fetchNewMessages(auth, convId, state.lastSeen[String(convId)], cutoff);
+    for (const m of fresh) {
+      state.lastSeen[String(convId)] = Math.max(state.lastSeen[String(convId)] || 0, m.id);
+      const ev = toEvent(m);
+      if (ev && ev.t >= cutoff) { state.messages[`m${m.id}`] = ev; added++; }
+    }
+  }
+
+  // message ids and log-entry ids come from different tables, hence the
+  // m/p key prefixes in the shared dedup map.
+  const expeditionId = process.env.FRAM_EXPEDITION_ID
+    || (readJson(BOOTSTRAP_PATH) || {}).expedition_id;
+  if (expeditionId) {
+    const fresh = await fetchNewLogEntries(auth, expeditionId, state.lastSeenEntry, cutoff);
+    for (const e of fresh) {
+      state.lastSeenEntry = Math.max(state.lastSeenEntry || 0, e.id);
+      const ev = toEvent(e);
+      if (ev && ev.t >= cutoff) { state.messages[`p${e.id}`] = ev; added++; }
+    }
+  }
+
+  // Age out of the window.
+  for (const [id, ev] of Object.entries(state.messages)) {
+    if (!ev.t || ev.t < cutoff) delete state.messages[id];
+  }
+
+  const byAgent = new Map();
+  for (const ev of Object.values(state.messages)) {
+    const cur = byAgent.get(ev.u) || { count: 0, lastAt: 0, lastMessage: '' };
+    cur.count++;
+    if (ev.t > cur.lastAt) { cur.lastAt = ev.t; cur.lastMessage = ev.c; }
+    byAgent.set(ev.u, cur);
+  }
+
+  const voices = [...byAgent.entries()]
+    .map(([u, v]) => ({ id: `fram:${u}`, lastMessage: v.lastMessage, lastAt: v.lastAt, messages30d: v.count }))
+    .sort((a, b) => b.lastAt - a.lastAt);
+
+  writeJsonAtomic(VOICES_PATH, {
+    schemaVersion: 1,
+    updatedAt: new Date().toISOString(),
+    source: 'fram-kartet-sync',
+    conversations: convIds,
+    voices
+  });
+  delete state.lastError;
+  writeJsonAtomic(STATE_PATH, state);
+  log(`ok — ${voices.length} voices, +${added} new messages, ${convIds.length} conversations`);
+}
+
+main().catch(err => {
+  log(`error: ${err.message} — keeping previous voices.json`);
+  process.exitCode = 0;
+});

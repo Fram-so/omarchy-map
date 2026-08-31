@@ -39,10 +39,13 @@ Two files under `~/.local/state/fram/`, read-only, polled every 2 s. The
 plugin never talks to Fram, never touches the network (avatars are plain
 public asset URLs fetched by Qt's image loader), and holds no credentials.
 
-- `agents.json` — the roster Fram Desktop already publishes: who exists,
-  name, avatar, state.
-- `voices.json` — **contract this plugin defines**, to be published by Fram
-  Desktop alongside the roster:
+- `agents.json` — the roster: who exists, name, avatar, state. Historically
+  written every 20 s by Fram Desktop; that writer died in the 2026-08-31 box
+  reinstall and its code exists in no checkout or git ref on this box, so the
+  file is currently a good-but-frozen snapshot. Roster churn is slow; the map
+  survives this.
+- `voices.json` — **contract this plugin defines**, published for real by
+  `bin/fram-kartet-sync` (below):
 
 ```json
 {
@@ -54,15 +57,42 @@ public asset URLs fetched by Qt's image loader), and holds no credentials.
 }
 ```
 
-Until the app publishes it, `bin/fram-kartet-mock` writes the same file from
-the real roster (real names, real avatars, staged ages), so the plugin cannot
-tell the difference:
+### The real publisher: `bin/fram-kartet-sync`
+
+Node script, no dependencies. Reads the engine token from `$FRAM_TOKEN` or
+from the `.fram.json` the runtime rewrites into the agent workdir every turn,
+then aggregates two API surfaces into per-agent voices: conversations of kind
+`channel`/null (task threads are skipped as noise) and the expedition feed
+(`/log_entries` — most crew activity is log entries, not chat; without the
+feed the map goes almost dark). Incremental via
+`~/.local/state/fram/kartet-sync-state.json`: steady-state runs fetch one
+page per surface and finish in about a second. AI crew only; system messages
+dropped; always exits 0 so the timer never flaps.
+
+Run on a 5-minute systemd user timer (`systemd/` in this repo):
+
+```bash
+cp systemd/fram-kartet-sync.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now fram-kartet-sync.timer
+```
+
+Token caveat: the engine JWT expires within a day, so if no agent turn
+refreshes `.fram.json` for that long the sync goes quiet (journal says why,
+`lastError` lands in the state file) and voices simply age out — which is the
+plugin's natural fade behaviour anyway.
+
+### The mock, for demos and empty-state testing
+
+`bin/fram-kartet-mock` writes the same file from the real roster (real names,
+real avatars, staged ages), so the plugin cannot tell the difference. With the
+timer active, sync overwrites the mock within five minutes.
 
 ```bash
 bin/fram-kartet-mock              # one frame covering every ring and fade band
 bin/fram-kartet-mock --count 8
 bin/fram-kartet-mock --empty      # the field should self-hide
-bin/fram-kartet-mock --restore    # hand voices.json back to the app
+bin/fram-kartet-mock --restore    # hand voices.json back to the publisher
 ```
 
 ## Settings

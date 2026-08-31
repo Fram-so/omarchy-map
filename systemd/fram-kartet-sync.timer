@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh Kartet voices.json every 5 minutes
+
+[Timer]
+OnBootSec=90
+OnUnitActiveSec=5min
+RandomizedDelaySec=20
+
+[Install]
+WantedBy=timers.target

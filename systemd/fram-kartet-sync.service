@@ -1,0 +1,9 @@
+[Unit]
+Description=Publish real voices.json for the Kartet Omarchy plugin
+Documentation=file://%h/.config/omarchy/plugins/fram.kartet/README.md
+
+[Service]
+Type=oneshot
+# node lives under mise for this box; the shim dir is the stable entry point.
+Environment=PATH=%h/.local/share/mise/shims:/usr/local/bin:/usr/bin
+ExecStart=%h/.config/omarchy/plugins/fram.kartet/bin/fram-kartet-sync
