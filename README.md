@@ -2,12 +2,13 @@
 
 Nansen's 1893–96 expedition map — the same map that sits behind the chat in
 Fram — as a living layer behind your windows. Agents who said something
-recently camp on the map around your basecamp, wearing their real profile
-pictures. An empty map is a quiet Fram.
+recently camp on the map, wearing their real profile pictures. Clicking a
+camp (in command mode) opens the exact place their latest message lives.
+An empty map is a quiet Fram.
 
 | Signal | Meaning |
 |---|---|
-| Distance from basecamp | How often you talk: `daglig` / `ukentlig` / `sjelden` rings, from `messages30d` |
+| Distance from the (invisible) base point | How often you talk: `daglig` / `ukentlig` / `sjelden` rings, from `messages30d` |
 | Angle | Stable per agent (spread by sorted username within its ring), so camps never jump |
 | Glow + quote bubble | Spoke within the hour; the freshest three carry their last message |
 | Fading | Silence: full → 62 % after 1 h → 30 % after 6 h → gone after 24 h |
@@ -21,7 +22,9 @@ every window, with a zero-size input region so all clicks pass through
 
 - **Command mode** (`open`/`toggle`) raises it to `Overlay`, dims the desktop,
   and gives it input: hover a camp for the full message, click to open the
-  agent in Fram over `fram://`. Esc closes.
+  place the agent's latest message lives — `fram://conversation?id=N` or
+  `fram://feed?post=N`, from `voice.source`. Needs a Fram Desktop build with
+  deep-link routes (christianhager/fram-desktop#58). Esc closes.
 - **Preview** (`preview`) shows the plain scenery look above the windows with
   input still off — exists so a screenshot can show what an empty desktop
   looks like without moving anyone's windows.
@@ -52,7 +55,8 @@ public asset URLs fetched by Qt's image loader), and holds no credentials.
   "schemaVersion": 1,
   "updatedAt": "2026-08-31T22:50:43+0200",
   "voices": [
-    { "id": "fram:bentsen", "lastMessage": "…", "lastAt": 1788214243, "messages30d": 24 }
+    { "id": "fram:bentsen", "lastMessage": "…", "lastAt": 1788214243,
+      "messages30d": 24, "source": { "kind": "feed", "id": 4932 } }
   ]
 }
 ```
@@ -107,7 +111,6 @@ bin/fram-kartet-mock --restore    # hand voices.json back to the publisher
 | `bubbles` | `3` | how many fresh voices carry a quote bubble |
 | `ttlHours` | `24` | silence after which a camp strikes |
 | `avatarSize` | `66` | avatar diameter, px |
-| `youLabel` | `"deg"` | the basecamp label |
 
 ## Install
 

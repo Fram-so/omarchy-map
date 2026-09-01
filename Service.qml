@@ -51,18 +51,12 @@ Item {
   function flag(key, fallback) {
     return config[key] === undefined ? fallback : config[key] === true
   }
-  function str(key, fallback) {
-    var value = config[key]
-    return (typeof value === "string" && value.length > 0) ? value : fallback
-  }
-
   readonly property bool enabled: flag("enabled", true)
   readonly property int maxCamps: Math.max(1, num("maxAgents", 14))
   readonly property real wash: Math.min(0.95, Math.max(0, num("wash", 0.52)))
   readonly property int bubbleCount: Math.max(0, num("bubbles", 3))
   readonly property real ttlHours: Math.max(1, num("ttlHours", 24))
   readonly property real avatarSize: Math.max(28, num("avatarSize", 66))
-  readonly property string youLabel: str("youLabel", "deg")
 
   // ── data files ────────────────────────────────────────────────────────
 
@@ -191,6 +185,7 @@ Item {
         avatar: agent.avatar || voice.avatar || "",
         initials: agent.initials || username.slice(0, 2).toUpperCase(),
         lastMessage: String(voice.lastMessage || ""),
+        source: voice.source || null,
         age: age,
         ago: agoText(age),
         fade: fadeOf(age),
@@ -304,54 +299,9 @@ Item {
       }
     }
 
-    // ── basecamp: you ───────────────────────────────────────────────────
-    Item {
-      x: field.baseX
-      y: field.baseY
-
-      Canvas {
-        id: tent
-        width: 52
-        height: 44
-        x: -width / 2
-        y: -height + 8
-        onPaint: {
-          var ctx = getContext("2d")
-          ctx.reset()
-          ctx.lineWidth = 3
-          ctx.lineJoin = "round"
-          ctx.strokeStyle = "#2C2418"
-          ctx.fillStyle = "#F7F5F0"
-          ctx.beginPath()
-          ctx.moveTo(3, height - 3)
-          ctx.lineTo(width / 2, 4)
-          ctx.lineTo(width - 3, height - 3)
-          ctx.closePath()
-          ctx.fill()
-          ctx.stroke()
-          ctx.lineWidth = 2.2
-          ctx.beginPath()
-          ctx.moveTo(width / 2, 4)
-          ctx.lineTo(width / 2, height - 3)
-          ctx.moveTo(width / 2 - 8, height - 3)
-          ctx.lineTo(width / 2, height - 17)
-          ctx.lineTo(width / 2 + 8, height - 3)
-          ctx.stroke()
-        }
-      }
-
-      Text {
-        anchors.horizontalCenter: tent.horizontalCenter
-        y: 14
-        text: root.youLabel + " · basecamp"
-        color: "#2C2418"
-        font.pixelSize: 13
-        style: Text.Outline
-        styleColor: "#F7F5F0"
-      }
-    }
-
     // ── the camps ───────────────────────────────────────────────────────
+    // (The rings still radiate from an invisible point at the bottom — the
+    // "you" position — but nothing is drawn there anymore.)
     Repeater {
       model: root.camps
 
@@ -466,7 +416,7 @@ Item {
         }
         Text {
           text: root.hoveredCamp
-            ? root.hoveredCamp.ago + " · " + root.hoveredCamp.freq + " meldinger siste 30 d · klikk for profil"
+            ? root.hoveredCamp.ago + " · " + root.hoveredCamp.freq + " meldinger siste 30 d · klikk for å åpne i Fram"
             : ""
           color: "#7A6E5A"
           font.pixelSize: 11
@@ -482,9 +432,18 @@ Item {
   }
 
   // ── actions ───────────────────────────────────────────────────────────
+  // A click opens the place the agent's latest message actually lives:
+  // its conversation, or the feed post. The routes are handled by Fram
+  // Desktop's deep-link handler (fram://conversation, fram://feed).
   function openAgent(camp) {
-    if (!camp || !camp.userId) return
-    Quickshell.execDetached(["xdg-open", "fram://profile?id=" + camp.userId])
+    if (!camp) return
+    var src = camp.source
+    var url = "fram://feed"
+    if (src && src.kind === "conversation" && src.id)
+      url = "fram://conversation?id=" + src.id
+    else if (src && src.kind === "feed" && src.id)
+      url = "fram://feed?post=" + src.id
+    Quickshell.execDetached(["xdg-open", url])
   }
 
   IpcHandler {

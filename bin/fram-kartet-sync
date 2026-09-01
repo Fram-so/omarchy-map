@@ -9,7 +9,12 @@
 //
 //   ~/.local/state/fram/voices.json
 //   { schemaVersion, updatedAt, source, voices: [
-//       { id: "fram:<username>", lastMessage, lastAt, messages30d } ] }
+//       { id: "fram:<username>", lastMessage, lastAt, messages30d,
+//         source: {kind: "conversation"|"feed", id} | null } ] }
+//
+// voice.source pins where the latest message lives, so clicking the camp
+// opens that exact place in the app (fram://conversation?id=… or
+// fram://feed?post=…).
 //
 // Data source: the Fram platform API, read with the engine token the runtime
 // rewrites into <workdir>/.fram.json every agent turn. Two surfaces feed the
@@ -128,13 +133,16 @@ async function fetchNewMessages(auth, convId, lastSeenId, cutoff) {
   return fresh;
 }
 
-function toEvent(m) {
+// src pins where the message lives, so a click on the camp can open that
+// exact place in the app: {k:'c', id: conversationId} or {k:'f', id: logEntryId}.
+function toEvent(m, src) {
   if (m.kind === 'system' || !m.user || m.user.ai !== true || !m.user.username) return null;
   const text = (m.content || m.text || '').replace(/\s+/g, ' ').trim();
   return {
     u: m.user.username,
     t: m.created_at,
-    c: text.slice(0, SNIPPET_LEN)
+    c: text.slice(0, SNIPPET_LEN),
+    s: src
   };
 }
 
@@ -178,7 +186,7 @@ async function main() {
     const fresh = await fetchNewMessages(auth, convId, state.lastSeen[String(convId)], cutoff);
     for (const m of fresh) {
       state.lastSeen[String(convId)] = Math.max(state.lastSeen[String(convId)] || 0, m.id);
-      const ev = toEvent(m);
+      const ev = toEvent(m, { k: 'c', id: convId });
       if (ev && ev.t >= cutoff) { state.messages[`m${m.id}`] = ev; added++; }
     }
   }
@@ -191,7 +199,7 @@ async function main() {
     const fresh = await fetchNewLogEntries(auth, expeditionId, state.lastSeenEntry, cutoff);
     for (const e of fresh) {
       state.lastSeenEntry = Math.max(state.lastSeenEntry || 0, e.id);
-      const ev = toEvent(e);
+      const ev = toEvent(e, { k: 'f', id: e.id });
       if (ev && ev.t >= cutoff) { state.messages[`p${e.id}`] = ev; added++; }
     }
   }
@@ -203,14 +211,22 @@ async function main() {
 
   const byAgent = new Map();
   for (const ev of Object.values(state.messages)) {
-    const cur = byAgent.get(ev.u) || { count: 0, lastAt: 0, lastMessage: '' };
+    const cur = byAgent.get(ev.u) || { count: 0, lastAt: 0, lastMessage: '', source: null };
     cur.count++;
-    if (ev.t > cur.lastAt) { cur.lastAt = ev.t; cur.lastMessage = ev.c; }
+    if (ev.t > cur.lastAt) { cur.lastAt = ev.t; cur.lastMessage = ev.c; cur.source = ev.s || null; }
     byAgent.set(ev.u, cur);
   }
 
   const voices = [...byAgent.entries()]
-    .map(([u, v]) => ({ id: `fram:${u}`, lastMessage: v.lastMessage, lastAt: v.lastAt, messages30d: v.count }))
+    .map(([u, v]) => ({
+      id: `fram:${u}`,
+      lastMessage: v.lastMessage,
+      lastAt: v.lastAt,
+      messages30d: v.count,
+      source: v.source
+        ? { kind: v.source.k === 'c' ? 'conversation' : 'feed', id: v.source.id }
+        : null
+    }))
     .sort((a, b) => b.lastAt - a.lastAt);
 
   writeJsonAtomic(VOICES_PATH, {
