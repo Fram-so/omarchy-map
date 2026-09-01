@@ -128,6 +128,23 @@ Item {
     onTriggered: root.nowSec = Date.now() / 1000
   }
 
+  // One input region per camp, tracking its click target's geometry.
+  property var campRegions: []
+
+  Component { id: campRegionFactory; Region {} }
+
+  function rebuildCampRegions() {
+    var fresh = []
+    for (var i = 0; i < campRepeater.count; i++) {
+      var slot = campRepeater.itemAt(i)
+      if (slot && slot.clickTarget)
+        fresh.push(campRegionFactory.createObject(field, { item: slot.clickTarget }))
+    }
+    var old = root.campRegions
+    root.campRegions = fresh
+    for (var j = 0; j < old.length; j++) if (old[j]) old[j].destroy()
+  }
+
   // ── the model ─────────────────────────────────────────────────────────
   // voices.json says who spoke; the roster dresses them (name, avatar).
   // Ring = conversation frequency, angle = stable per agent within its ring.
@@ -230,9 +247,13 @@ Item {
     WlrLayershell.keyboardFocus: root.commandMode ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
     exclusionMode: ExclusionMode.Ignore
 
+    // Scenery takes input only where the camps are (a region per avatar,
+    // rebuilt as camps come and go), so the rest of the map stays pure
+    // click-through. Command mode takes the whole surface.
     mask: Region {
       width: root.commandMode ? field.width : 0
       height: root.commandMode ? field.height : 0
+      regions: root.commandMode ? [] : root.campRegions
     }
 
     readonly property real baseX: width / 2
@@ -303,7 +324,10 @@ Item {
     // (The rings still radiate from an invisible point at the bottom — the
     // "you" position — but nothing is drawn there anymore.)
     Repeater {
+      id: campRepeater
       model: root.camps
+      onItemAdded: Qt.callLater(root.rebuildCampRegions)
+      onItemRemoved: Qt.callLater(root.rebuildCampRegions)
 
       delegate: Camp {
         id: slot
@@ -332,7 +356,6 @@ Item {
         bubbleRank: index
         ago: modelData.ago
         opacity: modelData.fade
-        interactive: root.commandMode
 
         onActivated: {
           root.openAgent(modelData)
@@ -458,9 +481,22 @@ Item {
         enabled: root.enabled,
         drawn: root.camps.length,
         commandMode: root.commandMode,
+        clickRegions: root.campRegions.length,
+        hovered: root.hoveredCamp ? root.hoveredCamp.username : null,
         voicesUpdatedAt: root.voices ? root.voices.updatedAt : null,
         rosterUpdatedAt: root.roster ? root.roster.updatedAt : null
       })
+    }
+
+    // Camp screen positions — lets a script park the cursor on one to verify
+    // the scenery input mask end to end.
+    function camps(): string {
+      var out = []
+      for (var i = 0; i < campRepeater.count; i++) {
+        var slot = campRepeater.itemAt(i)
+        if (slot) out.push({ u: slot.modelData.username, x: Math.round(slot.x), y: Math.round(slot.y) })
+      }
+      return JSON.stringify(out)
     }
   }
 }

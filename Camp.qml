@@ -16,8 +16,11 @@ Item {
   // side by side don't overlap each other's quotes.
   property int bubbleRank: 0
   property string ago: ""
-  property bool interactive: false
   property bool hovered: pointer.containsMouse
+
+  // The window's input mask is built from this item, so in scenery mode the
+  // surface takes input exactly where the camps are and nowhere else.
+  readonly property alias clickTarget: pointer
 
   signal activated()
   signal hoverChanged(bool inside)
@@ -167,8 +170,7 @@ Item {
     y: -camp.size / 2 - 6
     width: camp.size + 12
     height: camp.size + 12
-    enabled: camp.interactive
-    hoverEnabled: camp.interactive
+    hoverEnabled: true
     cursorShape: Qt.PointingHandCursor
     onClicked: camp.activated()
     onContainsMouseChanged: camp.hoverChanged(containsMouse)

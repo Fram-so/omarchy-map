@@ -20,17 +20,21 @@ The field is scenery on the wlr `Bottom` layer: above the wallpaper, below
 every window, with a zero-size input region so all clicks pass through
 (the fram.lemmings trick). Two IPC verbs lift it:
 
-- **Command mode** (`open`/`toggle`) raises it to `Overlay`, dims the desktop,
-  and gives it input: hover a camp for the full message, click to open the
-  place the agent's latest message lives — `fram://conversation?id=N` or
-  `fram://feed?post=N`, from `voice.source`. Needs a Fram Desktop build with
-  deep-link routes (christianhager/fram-desktop#58). Esc closes.
+- **Direct clicks in scenery**: the input mask is one region per camp
+  (tracking each avatar's geometry), so a visible camp is clickable right on
+  the desktop while every other pixel stays click-through. A camp covered by
+  a window belongs to the window — that's the layering working.
+- **Command mode** (`open`/`toggle`, bound to SUPER+SHIFT+K) raises it to
+  `Overlay` above the windows, dims, and takes full input: hover a camp for
+  the whole message, click to open the place the agent's latest message
+  lives — `fram://conversation?id=N` or `fram://feed?post=N`, from
+  `voice.source` (routes shipped in fram-desktop ≥ #58). Esc closes.
 - **Preview** (`preview`) shows the plain scenery look above the windows with
   input still off — exists so a screenshot can show what an empty desktop
   looks like without moving anyone's windows.
 
 ```bash
-omarchy-shell fram.kartet toggle|open|close|preview|status
+omarchy-shell fram.kartet toggle|open|close|preview|status|camps
 ```
 
 `status` prints what is drawn and how old the data is — first thing to check
