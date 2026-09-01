@@ -373,12 +373,12 @@ Item {
         size: root.avatarSize
         fresh: modelData.age < 3600
         showBubble: index < root.bubbleCount && modelData.age < 6 * 3600
-        // Fresh voices are usually ring-0 neighbours, so bubbles alternate
-        // sides by rank instead of splitting on the screen half — except
-        // near an edge, where the side that fits wins.
+        // Bubbles point outward from the cluster (west camps carry theirs
+        // west), so neighbours' quotes diverge instead of stacking into the
+        // middle — except near an edge, where the side that fits wins.
         bubbleOnLeft: rawX > field.width - 480 ? true
                     : rawX < 480 ? false
-                    : (index % 2) === 1
+                    : rawX < field.width / 2
         bubbleRank: index
         ago: modelData.ago
         opacity: modelData.fade

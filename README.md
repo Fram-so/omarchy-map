@@ -142,3 +142,6 @@ broken component fails alone: `quickshell -p <plugin-dir>/shell.qml`
   at load with a one-line error three imports away.
 - **IPC functions need a shell restart** — QML hot-reload picks up bindings
   and visuals, but newly added `IpcHandler` functions only register on load.
+- **The live shell does not hot-reload installed plugin code** in practice
+  (stale qmlcache) — after copying new files in, `omarchy-restart-shell` is
+  the reliable path; `rescanPlugins` alone was not enough.

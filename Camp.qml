@@ -122,7 +122,9 @@ Item {
     color: "#FFFFFF"
     border.color: "#E0DCD4"
     x: camp.bubbleOnLeft ? -(width + camp.size / 2 + 14) : camp.size / 2 + 14
-    y: -height - 6 - camp.bubbleRank * 66
+    // Rank bands must clear a full bubble (up to three wrapped lines), or a
+    // lifted bubble lands exactly on its fresher neighbour's.
+    y: -height - 6 - camp.bubbleRank * (height + 18)
 
     Column {
       id: quoteColumn
