@@ -146,6 +146,23 @@ function toEvent(m, src) {
   };
 }
 
+// Every expedition the token can see — the map is the whole workspace, not
+// one journey. Falls back to the bootstrap's single expedition when the
+// listing endpoint is unavailable.
+async function discoverExpeditions(auth) {
+  try {
+    const data = await apiGet(auth, '/expeditions');
+    const list = Array.isArray(data) ? data : (data.expeditions || []);
+    const ids = list.map(e => e.id).filter(id => Number.isInteger(id));
+    if (ids.length) return ids;
+  } catch (err) {
+    log(`expedition discovery failed: ${err.message}`);
+  }
+  const fallback = process.env.FRAM_EXPEDITION_ID
+    || (readJson(BOOTSTRAP_PATH) || {}).expedition_id;
+  return fallback ? [Number(fallback)] : [];
+}
+
 // The expedition feed, same watermark pattern as a conversation.
 async function fetchNewLogEntries(auth, expeditionId, lastSeenId, cutoff) {
   const fresh = [];
@@ -193,12 +210,21 @@ async function main() {
 
   // message ids and log-entry ids come from different tables, hence the
   // m/p key prefixes in the shared dedup map.
-  const expeditionId = process.env.FRAM_EXPEDITION_ID
+  const expeditionIds = await discoverExpeditions(auth);
+  if (!state.lastSeenEntryByExp) state.lastSeenEntryByExp = {};
+  // Migrate the single-expedition watermark from before multi-exp sync.
+  const legacyExp = process.env.FRAM_EXPEDITION_ID
     || (readJson(BOOTSTRAP_PATH) || {}).expedition_id;
-  if (expeditionId) {
-    const fresh = await fetchNewLogEntries(auth, expeditionId, state.lastSeenEntry, cutoff);
+  if (state.lastSeenEntry && legacyExp) {
+    const key = String(legacyExp);
+    state.lastSeenEntryByExp[key] = Math.max(state.lastSeenEntryByExp[key] || 0, state.lastSeenEntry);
+    delete state.lastSeenEntry;
+  }
+  for (const expId of expeditionIds) {
+    const key = String(expId);
+    const fresh = await fetchNewLogEntries(auth, expId, state.lastSeenEntryByExp[key], cutoff);
     for (const e of fresh) {
-      state.lastSeenEntry = Math.max(state.lastSeenEntry || 0, e.id);
+      state.lastSeenEntryByExp[key] = Math.max(state.lastSeenEntryByExp[key] || 0, e.id);
       const ev = toEvent(e, { k: 'f', id: e.id });
       if (ev && ev.t >= cutoff) { state.messages[`p${e.id}`] = ev; added++; }
     }
@@ -238,7 +264,7 @@ async function main() {
   });
   delete state.lastError;
   writeJsonAtomic(STATE_PATH, state);
-  log(`ok — ${voices.length} voices, +${added} new messages, ${convIds.length} conversations`);
+  log(`ok — ${voices.length} voices, +${added} new messages, ${convIds.length} conversations, ${expeditionIds.length} expeditions`);
 }
 
 main().catch(err => {
