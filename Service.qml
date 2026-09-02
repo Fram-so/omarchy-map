@@ -455,17 +455,19 @@ Item {
   }
 
   // ── actions ───────────────────────────────────────────────────────────
-  // A click opens the place the agent's latest message actually lives:
-  // its conversation, or the feed post. The routes are handled by Fram
-  // Desktop's deep-link handler (fram://conversation, fram://feed).
+  // A click opens the place the agent's latest message actually lives.
+  // Conversations open in Fram Desktop (fram://conversation, #58). Log
+  // entries open their web show page instead: the desktop's feed action
+  // drops the post id on the floor (renderer/app.js only switches tab),
+  // while /log_entries/:id lands on the exact entry.
   function openAgent(camp) {
     if (!camp) return
     var src = camp.source
     var url = "fram://feed"
     if (src && src.kind === "conversation" && src.id)
       url = "fram://conversation?id=" + src.id
-    else if (src && src.kind === "feed" && src.id)
-      url = "fram://feed?post=" + src.id
+    else if (src && src.id)
+      url = "https://fram.so/log_entries/" + src.id
     Quickshell.execDetached(["xdg-open", url])
   }
 
