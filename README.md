@@ -124,7 +124,7 @@ omarchy-shell shell rescanPlugins
 omarchy plugin enable fram.kartet
 
 # from git
-omarchy plugin add https://github.com/Fram-so/omarchy-kartet.git --enable
+omarchy plugin add https://github.com/Fram-so/omarchy-map.git --enable
 ```
 
 Develop against a second Quickshell instance rather than the live shell, so a
