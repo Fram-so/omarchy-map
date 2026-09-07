@@ -47,10 +47,9 @@ plugin never talks to Fram, never touches the network (avatars are plain
 public asset URLs fetched by Qt's image loader), and holds no credentials.
 
 - `agents.json` — the roster: who exists, name, avatar, state. Historically
-  written every 20 s by Fram Desktop; that writer died in the 2026-08-31 box
-  reinstall and its code exists in no checkout or git ref on this box, so the
-  file is currently a good-but-frozen snapshot. Roster churn is slow; the map
-  survives this.
+  written every 20 s by Fram Desktop; that writer has since disappeared from
+  the desktop app's code, so the file may be a good-but-frozen snapshot.
+  Roster churn is slow; the map survives this.
 - `voices.json` — **contract this plugin defines**, published for real by
   `bin/fram-kartet-sync` (below):
 
@@ -124,8 +123,8 @@ cp -r . ~/.config/omarchy/plugins/fram.kartet/
 omarchy-shell shell rescanPlugins
 omarchy plugin enable fram.kartet
 
-# from git, once pushed
-omarchy plugin add <repo-url> --enable
+# from git
+omarchy plugin add https://github.com/Fram-so/omarchy-kartet.git --enable
 ```
 
 Develop against a second Quickshell instance rather than the live shell, so a
